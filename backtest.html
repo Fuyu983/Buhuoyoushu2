@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>预测准确度回测｜补货有数</title>
+  <style>
+    :root{--ink:#172b4d;--muted:#60718a;--line:#dbe3ee;--paper:#fff;--bg:#f4f7fb;--blue:#2457d6;--orange:#e58b20;--green:#13845b;--red:#b42318}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 system-ui,"Microsoft YaHei",sans-serif}
+    header{background:#142d4e;color:#fff;padding:20px max(20px,calc((100vw - 1000px)/2));display:flex;align-items:center;justify-content:space-between;gap:20px}
+    h1{font-size:23px;margin:0}header p{color:#d4e2f5;margin:3px 0 0;font-size:13px}
+    header a{color:#dbe8f8;font-size:13px;white-space:nowrap}
+    main{max-width:1000px;margin:22px auto;padding:0 16px 40px}
+    .card{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:14px}
+    h2{font-size:17px;margin:0 0 8px}.muted,.small{color:var(--muted);font-size:13px}
+    .context{display:none;margin-top:12px;padding:11px 13px;border:1px solid #cddcff;border-radius:8px;background:#f2f6ff;font-size:14px}.context b{margin-right:12px}.context .small{display:block;margin-top:3px}
+    .controls{display:grid;grid-template-columns:180px 1fr;gap:14px;margin-top:16px}.stockout-control{margin-top:12px;max-width:420px}
+    label{display:block;font-size:13px;color:var(--muted);margin-bottom:5px}
+    input,textarea{width:100%;border:1px solid #c9d3e0;border-radius:7px;padding:9px 10px;font:inherit;color:var(--ink);background:#fff}
+    input:focus,textarea:focus{outline:2px solid #c9d9ff;border-color:var(--blue)}
+    textarea{min-height:150px;resize:vertical;font-family:ui-monospace,Consolas,monospace}
+    .actions{display:flex;align-items:center;gap:12px;margin-top:12px}
+    .forecast-options{display:flex;gap:14px;flex-wrap:wrap;margin:0 0 8px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:#f8fafd}.forecast-options label{display:flex;align-items:center;gap:7px;margin:0;cursor:pointer}.forecast-options input{width:auto;accent-color:var(--blue)}
+    button{border:0;border-radius:8px;padding:10px 16px;font:inherit;font-weight:650;cursor:pointer;background:var(--blue);color:#fff}
+    button:disabled{opacity:.6;cursor:wait}.status{font-size:13px;color:var(--muted)}.error{color:var(--red)}
+    .formula{margin-top:14px;padding:11px 13px;border:1px solid var(--line);border-radius:8px;background:#f8fafd;font-size:13px}
+    .formula p{margin:3px 0}.results{display:none}
+    .chart-wrap{width:100%;overflow-x:auto}.chart{display:block;width:100%;min-width:560px;height:auto}
+    .legend{display:flex;gap:18px;flex-wrap:wrap;margin:4px 0 12px;font-size:13px}
+    .legend span{display:inline-flex;align-items:center;gap:6px}.swatch{width:17px;height:3px;border-radius:3px;display:inline-block}
+    .model-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+    .model{border:1px solid var(--line);border-radius:9px;padding:14px}.model h3{font-size:15px;margin:0 0 8px}
+    .model .forecast{font-size:13px;color:var(--muted);margin-bottom:8px}
+    .metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+    .metric{background:#f8fafd;border-radius:7px;padding:9px}.metric span{display:block;font-size:12px;color:var(--muted)}.metric b{font-size:17px}
+    .summary{margin-top:12px;padding:11px 13px;background:#edf3ff;border-radius:8px}
+    @media(max-width:600px){header{align-items:flex-start}.controls,.model-grid{grid-template-columns:1fr}.card{padding:14px}.actions{align-items:flex-start;flex-direction:column}}
+  </style>
+</head>
+<body>
+  <header>
+    <div><h1>预测准确度回测</h1><p>用已经发生的销量，检查预测方法的误差</p></div>
+    <a href="./index.html" rel="noopener">返回补货决策页</a>
+  </header>
+  <main>
+    <section class="card">
+      <h2 id="inputTitle">输入一段连续的日销量</h2>
+      <p class="muted" id="inputDescription">选择同一商品、同一门店的销量，按时间从早到晚粘贴。最后 N 天会留作实际值进行比较；前面的销量用于预测。可直接粘贴 Excel 中的一行或一列数字。</p>
+      <div class="context" id="productContext"></div>
+      <div class="controls">
+        <div><label for="horizon">留出验证天数 N</label><input id="horizon" type="number" min="1" max="90" step="1" value="7"></div>
+        <div><label id="salesLabel" for="sales">历史日销量（单位沿用输入数据）</label><textarea id="sales" placeholder="例如：12, 10, 13, 9, 11, 14, 12, 15, 13, 16, 14, 12, 17, 15"></textarea></div>
+      </div>
+      <div class="stockout-control"><label for="stockoutDays">缺货日序号（可选，按销量从1开始）</label><input id="stockoutDays" placeholder="例如：3, 8"></div>
+      <div class="forecast-options">
+        <label><input id="useSeasonality" type="checkbox">比较周季节性（至少21天）</label>
+        <label><input id="useIntermittent" type="checkbox">比较间歇需求（需有零销量日）</label>
+      </div>
+      <p class="small" id="dataCaveat">至少需要7天训练数据，再加上所选验证天数。不要把不同商品或门店的销量混在一起。</p>
+      <div class="actions"><button id="run" type="button">开始回测</button><span class="status" id="status" role="status"></span></div>
+      <div class="formula">
+        <p><b>本页比较历史均值、近期加权平均和Holt阻尼趋势法；</b>可选周季节性或Croston-SBA间歇需求法。各方法使用历史时间切分回测；不满足数据条件的方法会跳过。</p>
+        <p><b>MAE</b> = 平均绝对误差；<b>WAPE</b> = 绝对误差总和 ÷ 实际销量总和。数值越小，表示本次留出区间误差越小。</p>
+        <p>标记缺货日后，训练期用此前最多7个正常销售日的均值估算缺货需求；验证期缺货日不计入误差。估算值不是实际需求。</p>
+      </div>
+    </section>
+    <div class="results" id="results">
+      <section class="card">
+        <h2>预测值与实际销量</h2>
+        <p class="muted" id="splitNote"></p>
+        <div class="legend" id="legend"></div>
+        <div class="chart-wrap" id="chart"></div>
+      </section>
+      <section class="card">
+        <h2 id="metricsTitle">多段回测误差汇总</h2>
+        <div class="model-grid" id="modelCards"></div>
+        <p class="summary" id="summary"></p>
+      </section>
+    </div>
+  </main>
+  <script>
+const mean=a=>a.length?a.reduce((s,x)=>s+x,0)/a.length:0;
+function forecastValues(a,method,n){const avg=x=>x.reduce((s,v)=>s+v,0)/x.length;if(method==='historical_mean')return Array(n).fill(avg(a));if(method==='recent_7_day_mean')return Array(n).fill(avg(a.slice(-7)));if(method==='weighted_average'){const r=a.slice(-14),den=r.length*(r.length+1)/2;return Array(n).fill(r.reduce((s,v,i)=>s+v*(i+1),0)/den);}if(method==='holt_trend'){if(a.length===1)return Array(n).fill(a[0]);let level=a[0],trend=avg(a.slice(1,Math.min(a.length,8)).map((v,i)=>v-a[i]));for(const v of a.slice(1)){const old=level;level=.35*v+.65*(level+.8*trend);trend=.15*(level-old)+.85*.8*trend;}let cum=0;return Array.from({length:n},()=>{cum=.8*(cum+trend);return Math.max(0,level+cum);});}return Array(n).fill(avg(a));}
+function runBacktest(p){const n=p.horizon_days,s=p.sales,flags=p.stockout_flags||Array(s.length).fill(false);if(!Array.isArray(s)||s.length<n+7)throw Error('数据不足：至少需要7天训练销量再加验证天数');if(!Number.isInteger(n)||n<1||n>90)throw Error('验证天数须为1到90');const train=s.slice(0,-n),actual=s.slice(-n),af=flags.slice(-n),keys=['historical_mean','recent_7_day_mean','weighted_average','holt_trend'],labels={historical_mean:'训练期全历史均值',recent_7_day_mean:'训练期最近7天均值',weighted_average:'近期加权平均',holt_trend:'Holt阻尼趋势法'},pred={};for(const k of keys)pred[k]=forecastValues(train,k,n);const models={};for(const k of keys){const errs=actual.map((v,i)=>Math.abs(v-pred[k][i])).filter((_,i)=>!af[i]),den=actual.filter((_,i)=>!af[i]).reduce((a,b)=>a+b,0);models[k]={label:labels[k],daily_forecast:mean(pred[k]),mae:errs.length?mean(errs):null,wape:den?errs.reduce((a,b)=>a+b,0)/den:null,evaluated_days:errs.length,excluded_stockout_days:af.filter(Boolean).length};}const points=actual.map((v,i)=>({day:i+1,actual:v,stockout:!!af[i],...Object.fromEntries(keys.map(k=>[k,pred[k][i]]))}));const roll={};for(const k of keys){const e=[];for(let end=s.length;end-n>=7&&e.length<6;end-=n){const tr=s.slice(0,end-n),act=s.slice(end-n,end),fl=flags.slice(end-n,end),pr=forecastValues(tr,k,n);pr.forEach((v,i)=>{if(!fl[i])e.push(Math.abs(v-act[i]));});}roll[k]={mae:e.length?mean(e):null,wape:null,window_count:Math.min(6,Math.floor((s.length-7)/n)),excluded_stockout_days:0};}return{horizon_days:n,training_days:train.length,test_days:n,metadata:p.metadata||{},models,points,rolling_validation:{window_count:Math.min(6,Math.floor((s.length-7)/n)),models:roll,windows:[]},forecast_notes:[],stockout_adjustments:0,note:'前段历史用于生成预测；最后所选天数只用于事后对照，未参与预测。'};}
+
+const defaultRaw = {"horizon_days":7,"nodes":{"supplier":{"initial_inventory":500},"regional":{"initial_inventory":80},"city":{"initial_inventory":6},"store_a":{"initial_inventory":10},"store_b":{"initial_inventory":0}},"edges":{"supplier->regional":{"lead_time_days":1,"shipping_cost_per_case":0.5},"regional->city":{"lead_time_days":1,"shipping_cost_per_case":0.4},"city->store_a":{"lead_time_days":1,"shipping_cost_per_case":0.2},"city->store_b":{"lead_time_days":1,"shipping_cost_per_case":0.2}},"historical_demand":{"store_a":[4,5,4,6,5,4,5],"store_b":[3,3,4,3,5,4,3]},"rules":{"service_level":95,"order_up_to_days":4},"future_actual_demand_for_validation":{"store_a":[5,5,6,4,5,6,5],"store_b":[3,4,3,4,4,3,4]}};
+const jsonResponse = (data, status=200) => new Response(JSON.stringify(data), {status, headers:{'content-type':'application/json; charset=utf-8'}});
+window.fetch = async function(input, init={}) {
+  const path = new URL(typeof input === 'string' ? input : input.url, location.href).pathname;
+  try {
+    if (path === '/api/version') return jsonResponse({version:'inventorybench-cost-import-20261013-2'});
+    if (path === '/api/default') return jsonResponse(defaults());
+    if (path === '/api/import' && init.method === 'POST') return jsonResponse(await importCsv(init.body));
+    if (path === '/api/run' && init.method === 'POST') return jsonResponse(runSimulation(JSON.parse(init.body)));
+    if (path === '/api/backtest' && init.method === 'POST') return jsonResponse(runBacktest(JSON.parse(init.body)));
+    return jsonResponse({error:'GitHub Pages 本地功能接口不存在'},404);
+  } catch (error) {
+    return jsonResponse({error:error?.message || '计算失败，请检查输入'},400);
+  }
+};
+
+</script>
+  <script>
+    const $ = function(id){return document.getElementById(id);};
+    const fmt = function(n){return n==null||!Number.isFinite(Number(n))?'—':Number(n).toFixed(2);};
+    const escapeHtml = function(value){return String(value).replace(/[&<>"']/g,function(char){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char];});};
+    let metadata = {};
+    function parseSales(){
+      const raw = $('sales').value.trim();
+      if(!raw) throw new Error('请先粘贴历史日销量');
+      const fields = raw.split(/[,\uFF0C;\uFF1B\t\r\n ]+/).filter(Boolean);
+      const values = fields.map(Number);
+      if(values.some(function(v){return !Number.isFinite(v)||v<0;})) throw new Error('销量请填写非负数字；只粘贴销量数字，不要包含商品编码或日期');
+      return values;
+    }
+    function parseStockoutFlags(length){
+      const raw=$('stockoutDays').value.trim();
+      if(!raw) return Array(length).fill(false);
+      const days=raw.split(/[,，;；\s]+/).filter(Boolean).map(Number);
+      if(days.some(function(day){return !Number.isInteger(day)||day<1||day>length;})||new Set(days).size!==days.length) throw new Error('缺货日序号须为1到'+length+'之间的整数且不能重复');
+      const flags=Array(length).fill(false);days.forEach(function(day){flags[day-1]=true;});
+      if(flags[0]) throw new Error('最早的缺货日之前没有正常销量，无法估算；请补充更早数据或取消该标记');
+      return flags;
+    }
+    function chartSvg(points){
+      const w=900,h=360,p={l:58,r:20,t:18,b:42},iw=w-p.l-p.r,ih=h-p.t-p.b,n=points.length;
+      const modelKeys=Object.keys(window.currentModels||{});
+      const maxVal=Math.max(1,...points.map(function(x){return Math.max.apply(null,[x.actual].concat(modelKeys.map(function(key){return x[key]||0;})));}));
+      const top=maxVal*1.12;
+      const x=function(i){return p.l+(n===1?iw/2:i*iw/(n-1));};
+      const y=function(v){return p.t+ih-(v/top)*ih;};
+      let svg='<svg class="chart" viewBox="0 0 '+w+' '+h+'" role="img" aria-label="回测期预测销量和实际销量折线图">';
+      for(let i=0;i<=4;i++){
+        const val=top*i/4, yy=y(val);
+        svg+='<line x1="'+p.l+'" y1="'+yy+'" x2="'+(w-p.r)+'" y2="'+yy+'" stroke="#e5eaf1"/>';
+        svg+='<text x="'+(p.l-9)+'" y="'+(yy+4)+'" text-anchor="end" fill="#60718a" font-size="12">'+fmt(val)+'</text>';
+      }
+      const colors=['#e58b20','#13845b','#7356bf','#c14c73','#208fa6','#718096'];
+      const series=[{key:'actual',color:'#2457d6',width:3}].concat(modelKeys.map(function(key,index){return {key:key,color:colors[index%colors.length],width:2};}));
+      series.forEach(function(s){
+        const coords=points.map(function(pt,i){return x(i)+','+y(pt[s.key]);}).join(' ');
+        svg+='<polyline points="'+coords+'" fill="none" stroke="'+s.color+'" stroke-width="'+s.width+'" stroke-linejoin="round" stroke-linecap="round"/>';
+        if(s.key==='actual') points.forEach(function(pt,i){svg+='<circle cx="'+x(i)+'" cy="'+y(pt.actual)+'" r="'+(pt.stockout?'5':'3.5')+'" fill="'+(pt.stockout?'#b42318':s.color)+'"/>';});
+      });
+      const labelCount=Math.min(n,7);
+      for(let i=0;i<labelCount;i++){
+        const ix=labelCount===1?0:Math.round(i*(n-1)/(labelCount-1));
+        svg+='<text x="'+x(ix)+'" y="'+(h-14)+'" text-anchor="middle" fill="#60718a" font-size="12">第'+(ix+1)+'天</text>';
+      }
+      svg+='</svg>';
+      return svg;
+    }
+    function modelCard(model){
+      const wape=model.wape===null?'—（实际总销量为0）':fmt(model.wape*100)+'%';
+      const count=model.window_count||0;
+      return '<article class="model"><h3>'+model.label+'</h3><div class="forecast">最近一段每日预测均值：'+fmt(model.daily_forecast)+'</div><div class="metrics"><div class="metric"><span>滚动 MAE（'+count+'段）</span><b>'+fmt(model.mae)+'</b></div><div class="metric"><span>滚动 WAPE</span><b>'+wape+'</b></div></div>'+(model.excluded_stockout_days?'<div class="small">误差计算剔除缺货日 '+model.excluded_stockout_days+' 天</div>':'')+'</article>';
+    }
+    function render(data){
+      const rolling=data.rolling_validation||{window_count:1,models:data.models};
+      $('splitNote').textContent='图表展示最近 '+data.test_days+' 天：只用之前 '+data.training_days+' 天预测；蓝线保留实际已售量，标记缺货日不会纳入误差。历史训练中的 '+(data.stockout_adjustments||0)+' 个缺货日按此前正常销量估算。误差汇总最多使用6段历史验证数据；各段均只使用验证开始前的数据。'+((data.forecast_notes||[]).length?' '+data.forecast_notes.join('；'):'');
+      window.currentModels=data.models;
+      const palette=['#e58b20','#13845b','#7356bf','#c14c73','#208fa6','#718096'];
+      $('legend').innerHTML='<span><i class="swatch" style="background:#2457d6"></i>实际销量</span>'+(data.points.some(function(point){return point.stockout;})?'<span><i class="swatch" style="background:#b42318"></i>缺货日（不计误差）</span>':'')+Object.keys(data.models).map(function(key,index){return '<span><i class="swatch" style="background:'+palette[index%palette.length]+'"></i>'+escapeHtml(data.models[key].label)+'</span>';}).join('');
+      $('chart').innerHTML=chartSvg(data.points);
+      const keys=Object.keys(data.models).filter(function(key){return rolling.models[key];});
+      $('modelCards').innerHTML=keys.map(function(key){return modelCard({...data.models[key],...rolling.models[key]});}).join('');
+      $('metricsTitle').textContent='历史回测误差汇总（共'+rolling.window_count+'段）';
+      const ranked=keys.map(function(key){return {label:data.models[key].label,mae:rolling.models[key].mae};}).sort(function(a,b){return a.mae-b.mae;});
+      let winner=ranked.length?'这些历史验证段中，MAE最低的是'+ranked[0].label+'。不同商品和时段的结果可能不同，这不保证未来仍然最准确。':'当前数据不足以形成可比较的滚动验证段。';
+      $('summary').textContent=winner;
+      $('results').style.display='block';
+    }
+    function loadContext(){
+      const key=new URLSearchParams(location.search).get('context');
+      if(!key) return;
+      try{
+        const raw=localStorage.getItem(key);
+        localStorage.removeItem(key);
+        if(!raw) return;
+        const context=JSON.parse(raw);
+        if(!Array.isArray(context.sales)||!context.sales.length) return;
+        metadata={sku:String(context.sku||''),product_name:String(context.product_name||''),node_name:String(context.node_name||''),unit:String(context.unit||'件/天'),source:String(context.source||'')};
+        const availableHoldout=Math.max(1,context.sales.length-7);
+        $('horizon').value=Math.min(7,availableHoldout);
+        $('inputTitle').textContent='商品销量预测回测';
+        $('inputDescription').textContent='本次直接使用该商品在该门店已经录入的连续历史销量。最后 N 天只作为实际销量进行比较，不参与预测。';
+        $('salesLabel').textContent='已带入历史日销量（'+metadata.unit+'）';
+        $('sales').value=context.sales.join(', ');
+        $('stockoutDays').value=(context.stockout_days||[]).join(', ');
+        $('useSeasonality').checked=Boolean(context.forecast_options&&context.forecast_options.seasonal);
+        $('useIntermittent').checked=Boolean(context.forecast_options&&context.forecast_options.intermittent);
+        $('sales').readOnly=true;
+        $('stockoutDays').readOnly=true;
+        $('sales').setAttribute('aria-label','从商品表单带入的历史日销量');
+        $('productContext').innerHTML='<b>'+escapeHtml(metadata.sku)+'</b>'+escapeHtml(metadata.product_name)+' · '+escapeHtml(metadata.node_name)+' · '+escapeHtml(metadata.unit)+'<span class="small">来源：补货决策页当前商品和门店销量，共 '+context.sales.length+' 天</span>';
+        $('productContext').style.display='block';
+        $('dataCaveat').textContent='销量和缺货日来自补货决策页；调整请返回修改。缺货日不计入验证误差。';
+        $('run').disabled=context.sales.length<8;
+        if(context.sales.length<8){
+          $('status').className='status error';
+          $('status').textContent='至少需要8天连续销量：前7天训练，再留出至少1天验证。';
+        }
+        updateContextReadiness();
+      }catch(error){
+        $('status').className='status error';
+        $('status').textContent='无法读取商品回测数据，请从商品销量行重新打开';
+      }
+    }
+    function updateContextReadiness(){
+      if(!metadata.sku) return;
+      const horizon=Number($('horizon').value),sales=parseSales();
+      if(!Number.isInteger(horizon)||horizon<1||horizon>90){
+        $('run').disabled=true;
+        $('dataCaveat').textContent='验证天数须为1到90的整数。';
+        return;
+      }
+      const enough=sales.length>=7+horizon;
+      $('run').disabled=!enough;
+      const windows=Math.min(6,Math.floor((sales.length-7)/horizon));
+      $('dataCaveat').textContent='当前 '+sales.length+' 天数据，至少需要 '+(7+horizon)+' 天才能留出 '+horizon+' 天验证；预计可汇总 '+windows+' 段。已标记缺货日会从误差计算中剔除。';
+      $('status').className=enough?'status':'status error';
+      $('status').textContent=enough?'':'当前销量天数不足，请缩短验证天数或补充历史销量。';
+    }
+    $('run').addEventListener('click',async function(){
+      const button=$('run'),status=$('status');
+      button.disabled=true;status.className='status';status.textContent='正在回测…';
+      try{
+        const horizon=Number($('horizon').value),sales=parseSales(),stockout_flags=parseStockoutFlags(sales.length);
+        if(!Number.isInteger(horizon)||horizon<1||horizon>90) throw new Error('留出天数须为1到90的整数');
+        if(sales.length>2000) throw new Error('最多支持2000天销量');
+        const response=await fetch('/api/backtest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({horizon_days:horizon,sales:sales,stockout_flags:stockout_flags,metadata:metadata,forecast_options:{seasonal:$('useSeasonality').checked,intermittent:$('useIntermittent').checked}})});
+        const data=await response.json();
+        if(!response.ok) throw new Error(data.error||'回测失败');
+        render(data);status.textContent='回测完成';
+      }catch(error){
+        status.className='status error';
+        status.textContent=error instanceof TypeError?'无法连接本地计算服务，请先启动补货有数。':error.message;
+      }finally{button.disabled=false;}
+    });
+    $('horizon').addEventListener('input',function(){
+      if(!metadata.sku) return;
+      const max=Math.max(1,Number($('horizon').max));
+      const value=Number($('horizon').value);
+      if(Number.isInteger(value)&&value>=1&&value<=max) updateContextReadiness();
+    });
+    loadContext();
+  </script>
+</body>
+</html>
